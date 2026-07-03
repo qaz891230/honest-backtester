@@ -48,6 +48,9 @@ the validated core.
   find one flattering number.
 - **Keyless data downloader** (`download_data.py`) — public klines via `ccxt`,
   no API keys.
+- **Local CSV cache for fast iteration.** Data is cached on disk; repeated
+  backtests read from the cache with no re-download, and `load_or_download`
+  fetches a symbol only once. Updates are incremental (only new bars).
 
 ## Install
 
@@ -78,6 +81,37 @@ python download_data.py --symbols BTC/USDT:USDT,ETH/USDT:USDT --timeframes 1h,15
 
 Klines are public market data; they are included here only to make the examples
 reproducible. Re-download from your own venue if you need authoritative bars.
+
+## Local cache (why repeated backtests are fast)
+
+Data lives on disk as plain CSV under `data/`, and the loader reads straight from
+it — so once a symbol/timeframe is cached, every backtest on it is instant with
+**no network calls**. This is the difference between iterating in seconds versus
+re-pulling years of klines on every run.
+
+One call handles both cases (load from cache, or download-once-then-cache):
+
+```python
+from backtester.data import load_or_download
+
+# First call for a new symbol downloads + caches; every later call is instant.
+df = load_or_download("BTC/USDT:USDT", "1h")          # reads data/ if present
+
+# Top up an existing cache to the latest bars (fetches only the new ones):
+df = load_or_download("BTC/USDT:USDT", "1h", update=True)
+```
+
+Update or extend the whole cache from the command line (incremental, keyless):
+
+```bash
+python download_data.py --exchange binance --market-type swap \
+    --symbols BTC/USDT:USDT,ETH/USDT:USDT --timeframes 1h,15m --years 3
+python download_data.py --full     # force a clean full re-fetch
+```
+
+Re-running the downloader only fetches bars newer than what's already cached, so
+keeping data current is cheap. The bundled `data/` is just a pre-filled cache —
+delete or refresh it freely.
 
 ## Quick start
 
