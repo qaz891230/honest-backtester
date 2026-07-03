@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+# generated output
+equity_curve.csv
+.DS_Store
+
+# NOTE: bundled market data under data/*.csv IS committed on purpose (see README).
+# If you don't want to track freshly downloaded data, add a pattern here.

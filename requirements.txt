@@ -1,0 +1,3 @@
+pandas>=1.5
+numpy>=1.23
+ccxt>=4.0     # only needed for download_data.py
