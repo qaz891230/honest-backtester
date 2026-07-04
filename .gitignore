@@ -5,7 +5,10 @@ venv/
 .env
 # generated output
 equity_curve.csv
+charts/
+/trade_zoom.png
+/overview.png
 .DS_Store
 
 # NOTE: bundled market data under data/*.csv IS committed on purpose (see README).
-# If you don't want to track freshly downloaded data, add a pattern here.
+# Example chart images live under docs/ and ARE committed.

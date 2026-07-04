@@ -12,18 +12,24 @@ assumptions:
   * Breakeven: after price reaches +`be_at_r`, the stop is moved to lock in
     `be_offset_r` (in R) or `be_offset_pct` (in price %). Crucially the moved
     stop is *capped at the trigger price* — you cannot lock in more than the
-    move that actually happened on that bar. (Without this cap a fast simulator
-    systematically over-counts breakeven winners; this cap is what makes the
-    fast path agree with a bar-by-bar reference.)
+    move that actually happened on that bar.
   * Funding is charged per 8h funding window held (perp-style).
 
 Within a single bar the order of touches is unknown from OHLC alone, so the
 engine resolves ambiguity pessimistically (stop is assumed to fill before target
 when both are inside the same bar's range).
+
+The result also carries an `events` list — every discrete action the engine took
+on the trade (entry, breakeven move, partial take-profit, final exit) with the
+bar index and price — so a run can be drawn on a chart and verified visually.
 """
 from __future__ import annotations
+from collections import namedtuple
 import math
 import numpy as np
+
+# Rich result so callers get the real fill price and the action timeline.
+ExitResult = namedtuple("ExitResult", "net cost exit_index reason exit_price events")
 
 
 def _first_true(arr):
@@ -38,7 +44,7 @@ def simulate_exit(high, low, close, epoch_s, entry_j, entry, stop, direction,
                   be_offset_pct=0.0, be_offset_r=0.0, scan_cap=400, tp_taker=False):
     """Simulate a single trade from bar `entry_j` forward.
 
-    Returns (net_pnl_quote, total_cost_quote, exit_index, reason) or None.
+    Returns an ExitResult(net, cost, exit_index, reason, exit_price, events) or None.
 
     costs = (taker_fee, maker_fee, slippage, funding_rate, apply_funding)
     All fees are fractions of notional (e.g. 0.0005 = 5 bps).
@@ -76,6 +82,9 @@ def simulate_exit(high, low, close, epoch_s, entry_j, entry, stop, direction,
     took_partial = False
     exit_k = None
     reason = "open_end"
+    exit_price = None
+    events = [{"type": "entry", "index": entry_j, "price": float(entry),
+               "direction": direction}]
 
     # Breakeven: if the BE trigger is reached before stop/target, move the stop.
     if be_price is not None:
@@ -87,6 +96,8 @@ def simulate_exit(high, low, close, epoch_s, entry_j, entry, stop, direction,
                 stop = entry * (1 + sign * be_offset_pct)
             # Cap the moved stop at the trigger price (see module docstring).
             stop = min(stop, be_price) if direction == "long" else max(stop, be_price)
+            events.append({"type": "breakeven", "index": entry_j + b0,
+                           "price": float(stop)})
             _be_stop_hit = (L <= stop) if direction == "long" else (H >= stop)
             eh = _first_true(_be_stop_hit[b0 + 1:])
             s0 = (b0 + 1 + eh) if eh is not None else None
@@ -97,14 +108,18 @@ def simulate_exit(high, low, close, epoch_s, entry_j, entry, stop, direction,
         exit_k = s0
         remaining = 0.0
         reason = "stop"
+        exit_price = float(stop)
     elif a0 is not None:
         realized += (t1 - entry) * sign * qty * partial
         cost += t1 * qty * partial * tp_fee
         remaining -= partial
         took_partial = True
         exit_k = a0
+        if partial < 1.0 - 1e-9:
+            events.append({"type": "partial", "index": entry_j + a0, "price": float(t1)})
         if remaining <= 1e-9:
             reason = "target_first_full"
+            exit_price = float(t1)
         else:
             s2 = _first_true(entry_hit_full[a0:])
             f2 = _first_true(tf_hit[a0:]) if tf_hit is not None else None
@@ -112,12 +127,14 @@ def simulate_exit(high, low, close, epoch_s, entry_j, entry, stop, direction,
                 exit_k = a0 + s2
                 remaining = 0.0
                 reason = "partial_then_stop"
+                exit_price = float(entry)  # remainder closed at breakeven (entry)
             elif f2 is not None:
                 realized += (t_final - entry) * sign * qty * remaining
                 cost += t_final * qty * remaining * tp_fee
                 exit_k = a0 + f2
                 remaining = 0.0
                 reason = "target_final"
+                exit_price = float(t_final)
 
     # Anything still open at the scan horizon is marked-to-market at the last close.
     if remaining > 1e-9:
@@ -127,11 +144,17 @@ def simulate_exit(high, low, close, epoch_s, entry_j, entry, stop, direction,
         exit_k = m - 1
         remaining = 0.0
         reason = "open_end_partial" if took_partial else "open_end"
+        exit_price = last_px
     if exit_k is None:
         return None
     exit_idx = entry_j + exit_k
+    if exit_price is None:
+        exit_price = float(close[exit_idx])
     if apply_funding:
         ka = math.ceil(epoch_s[entry_j] / 28800.0)
         kb = math.floor(epoch_s[exit_idx] / 28800.0)
         cost += funding * (entry * qty) * max(0, kb - ka + 1)
-    return (realized - cost, cost, exit_idx, reason)
+
+    events.append({"type": "exit", "index": exit_idx, "price": float(exit_price),
+                   "reason": reason})
+    return ExitResult(realized - cost, cost, exit_idx, reason, float(exit_price), events)

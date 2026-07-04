@@ -134,14 +134,14 @@ def run_backtest(df, strategy, cfg: BacktestConfig = None):
             continue
 
         # --- 4. exit ---
-        out = simulate_exit(high, low, close, epoch_s, entry_j, entry, stop, d,
+        res = simulate_exit(high, low, close, epoch_s, entry_j, entry, stop, d,
                             t1, t_final, qty, sig.partial, costs,
                             be_at_r=cfg.be_at_r, be_offset_pct=cfg.be_offset_pct,
                             be_offset_r=cfg.be_offset_r, scan_cap=cfg.scan_cap,
                             tp_taker=cfg.tp_taker)
-        if out is None:
+        if res is None:
             continue
-        net, cost, exit_idx, reason = out
+        net, cost, exit_idx, reason = res.net, res.cost, res.exit_index, res.reason
         r_amt = risk_amount(equity, cfg.risk_mode, cfg.risk_per_trade)
         r_val = round(net / r_amt, 3) if r_amt else 0.0
 
@@ -149,9 +149,10 @@ def run_backtest(df, strategy, cfg: BacktestConfig = None):
         equity += net
         total_cost += cost
         curve.append((exit_idx, round(equity, 2)))
+        meta = dict(sig.meta)
+        meta["events"] = res.events          # every action taken (for plotting/verification)
         trades.append(Trade(entry_j, d, entry, stop, t_final, exit_idx,
-                            float(close[exit_idx]), r_val, round(net, 2), reason,
-                            dict(sig.meta)))
+                            res.exit_price, r_val, round(net, 2), reason, meta))
 
     span_days = max((df.index[-1] - df.index[0]).days, 1) if n else 1
     res = summary(trades, equity, start, total_cost, curve, span_days)

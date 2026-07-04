@@ -1,3 +1,4 @@
 pandas>=1.5
 numpy>=1.23
-ccxt>=4.0     # only needed for download_data.py
+ccxt>=4.0         # only needed for download_data.py (fetching klines)
+matplotlib>=3.5   # only needed for backtester.plot (charts)

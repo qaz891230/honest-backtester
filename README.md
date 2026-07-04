@@ -51,6 +51,10 @@ the validated core.
 - **Local CSV cache for fast iteration.** Data is cached on disk; repeated
   backtests read from the cache with no re-download, and `load_or_download`
   fetches a symbol only once. Updates are incremental (only new bars).
+- **Chart visualization for verification** (`backtester/plot.py`). Draw every
+  engine action — entry, stop/target levels, breakeven move, partial take-profit,
+  final exit (coloured by reason) — on candlesticks, so you can *see* whether the
+  engine is behaving.
 
 ## Install
 
@@ -192,6 +196,37 @@ results = grid_sweep(df, lambda **p: DonchianBreakout(**p),
 for k, t0, t1, r in walk_forward(df, DonchianBreakout(), n_folds=5):
     print(k, r["profit_factor"], r["total_r"])
 ```
+
+## Visualize / verify on the chart
+
+Numbers can hide bugs; a chart usually can't. `backtester.plot` draws every
+discrete action the engine took on candlesticks — entry, the stop and target
+levels, any breakeven move, partial take-profit, and the final exit (coloured by
+reason) — so you can eyeball whether each trade did the right thing.
+
+```python
+from backtester.plot import plot_trade, plot_run
+
+plot_trade(df, res["_trades"][0], path="trade.png")          # zoom one trade
+plot_run(df, res, start=1100, end=1400, path="overview.png") # a window overview
+```
+
+Or just run the example, which saves an overview plus a few single-trade zooms
+to `charts/`:
+
+```bash
+python plot_example.py
+```
+
+A single-trade zoom (entry ▼, breakeven move ◆, partial take-profit ●, final
+target exit ★, with stop/target level lines):
+
+![example trade](docs/example_trade.png)
+
+Legend: entry = blue triangle (▲ long / ▼ short); initial stop = red dashed;
+final target = green dashed; breakeven move = grey diamond; partial TP = orange
+dot; exit marker is coloured by reason (red ✕ stop, green ★ target, orange ▪
+breakeven exit, grey ● time exit).
 
 ## Metrics
 
