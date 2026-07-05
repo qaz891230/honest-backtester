@@ -36,9 +36,22 @@ the validated core.
   - **Breakeven stops are capped at the trigger price.** You can never lock in
     more than the move that actually happened on the trigger bar. (Skipping this
     cap is a classic way fast simulators over-count breakeven winners.)
+  - **Intrabar-honest breakeven (`be_intrabar="honest"`, default).** OHLC cannot
+    reveal the tick path inside the bar that triggers a breakeven move, and the
+    optimistic convention (trigger bar assumed "held"; a same-bar target booked
+    as a clean TP) systematically flatters tight locks — in live trading this
+    exact bias produced a 69% vs 32% breakeven-exit-rate divergence (4.7 sigma)
+    before it was caught. Honest rule: if the trigger bar **closes** beyond the
+    moved stop, the trade is stopped on that bar; a same-bar target only counts
+    when the close held the lock. Set `be_intrabar="optimistic"` to A/B the
+    legacy behaviour.
   - **Funding** charged per 8h window held (perp-style).
   - Within one bar the touch order is unknown from OHLC, so ties are resolved
     **pessimistically** (stop assumed before target).
+- **Pending orders occupy the account (`pending_occupy=True`, default).** A
+  resting limit that never fills still blocked the (serial) account until it
+  expired — exactly like a live bot. Disabling this systematically overrates
+  long entry windows in sweeps.
 - **R-based accounting.** Everything is measured in R (multiples of the fixed
   risk per trade), which is account-size independent and comparable across assets.
 - **A pre-trade risk guard** that rejects absurd position sizes (unit mix-ups,

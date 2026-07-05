@@ -38,7 +38,7 @@ class Trade:
 
 @dataclass
 class BacktestConfig:
-    equity0: float = 100.0
+    equity0: float = 10000.0          # large enough that the leverage cap / equity floor never distorts fixed-R research
     # Sizing
     risk_mode: str = "fixed"          # "fixed" (R = fixed quote) or "percent" (R = equity*risk_per_trade)
     risk_per_trade: float = 10.0
@@ -59,6 +59,8 @@ class BacktestConfig:
     # Exit realism
     tp_taker: bool = False            # pessimistic: assume resting TP misses -> market exit
     scan_cap: int = 400              # max bars to hold before mark-to-market
+    be_intrabar: str = "honest"       # BE trigger-bar rule: "honest" (close-rule lock-out, default) / "optimistic" (legacy A/B)
+    pending_occupy: bool = True       # unfilled limit order occupies the serial account until it expires (mirrors a live bot)
 
 
 def _costs(cfg: BacktestConfig):
@@ -110,6 +112,10 @@ def run_backtest(df, strategy, cfg: BacktestConfig = None):
                     entry_j = j
                     break
             if entry_j is None:
+                if cfg.pending_occupy:
+                    # The resting limit occupied the account until it expired: later
+                    # signals in that window would have been skipped by a live bot.
+                    busy_until = max(busy_until, min(i + sig.entry_window, n - 1))
                 continue  # limit never filled -> idea expires
 
         stop = sig.stop
@@ -138,7 +144,7 @@ def run_backtest(df, strategy, cfg: BacktestConfig = None):
                             t1, t_final, qty, sig.partial, costs,
                             be_at_r=cfg.be_at_r, be_offset_pct=cfg.be_offset_pct,
                             be_offset_r=cfg.be_offset_r, scan_cap=cfg.scan_cap,
-                            tp_taker=cfg.tp_taker)
+                            tp_taker=cfg.tp_taker, be_intrabar=cfg.be_intrabar)
         if res is None:
             continue
         net, cost, exit_idx, reason = res.net, res.cost, res.exit_index, res.reason

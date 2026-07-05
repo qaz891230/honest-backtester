@@ -41,7 +41,8 @@ def _first_true(arr):
 
 def simulate_exit(high, low, close, epoch_s, entry_j, entry, stop, direction,
                   t1, t_final, qty, partial, costs, be_at_r=0.0,
-                  be_offset_pct=0.0, be_offset_r=0.0, scan_cap=400, tp_taker=False):
+                  be_offset_pct=0.0, be_offset_r=0.0, scan_cap=400, tp_taker=False,
+                  be_intrabar="honest"):
     """Simulate a single trade from bar `entry_j` forward.
 
     Returns an ExitResult(net, cost, exit_index, reason, exit_price, events) or None.
@@ -89,7 +90,8 @@ def simulate_exit(high, low, close, epoch_s, entry_j, entry, stop, direction,
     # Breakeven: if the BE trigger is reached before stop/target, move the stop.
     if be_price is not None:
         b0 = _first_true(be_hit)
-        if b0 is not None and (s0 is None or b0 < s0) and (a0 is None or b0 < a0):
+        _honest = (be_intrabar != "optimistic")
+        if b0 is not None and (s0 is None or b0 < s0) and (a0 is None or (b0 <= a0 if _honest else b0 < a0)):
             if be_offset_r and be_offset_r > 0:
                 stop = entry + sign * r_unit * be_offset_r
             else:
@@ -98,9 +100,25 @@ def simulate_exit(high, low, close, epoch_s, entry_j, entry, stop, direction,
             stop = min(stop, be_price) if direction == "long" else max(stop, be_price)
             events.append({"type": "breakeven", "index": entry_j + b0,
                            "price": float(stop)})
-            _be_stop_hit = (L <= stop) if direction == "long" else (H >= stop)
-            eh = _first_true(_be_stop_hit[b0 + 1:])
-            s0 = (b0 + 1 + eh) if eh is not None else None
+            # Intrabar honesty (default): OHLC bars cannot tell us the tick path inside
+            # the trigger bar. The optimistic legacy treated the trigger bar as "held"
+            # (lock-out only checked from the NEXT bar) and booked a target hit in the
+            # SAME bar as a clean TP. Both flatter tight locks: live trading showed a
+            # 69% vs 32% breakeven-exit-rate divergence (4.7 sigma). Honest rule: if the
+            # trigger bar CLOSES beyond the moved stop, the trade is stopped on that bar;
+            # a same-bar target only counts if the close held above the moved stop.
+            _c0 = close[entry_j + b0]
+            _lock_b0 = _honest and ((_c0 < stop) if direction == "long" else (_c0 > stop))
+            if _lock_b0:
+                s0 = b0
+                if a0 is not None and a0 >= b0:
+                    a0 = None
+            elif _honest and a0 is not None and a0 == b0:
+                s0 = None   # same-bar target with close holding the lock -> TP branch
+            else:
+                _be_stop_hit = (L <= stop) if direction == "long" else (H >= stop)
+                eh = _first_true(_be_stop_hit[b0 + 1:])
+                s0 = (b0 + 1 + eh) if eh is not None else None
 
     if s0 is not None and (a0 is None or s0 <= a0):
         realized += (stop - entry) * sign * qty * remaining
