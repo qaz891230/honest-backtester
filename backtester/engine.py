@@ -61,6 +61,13 @@ class BacktestConfig:
     scan_cap: int = 400              # max bars to hold before mark-to-market
     be_intrabar: str = "honest"       # BE trigger-bar rule: "honest" (close-rule lock-out, default) / "optimistic" (legacy A/B)
     pending_occupy: bool = True       # unfilled limit order occupies the serial account until it expires (mirrors a live bot)
+    # Entry-fill realism (post-only queue physics). A resting maker order is NOT
+    # guaranteed a fill when price merely touches its level: it fills when price
+    # trades *through* it (queue priority). Touch=fill backtests systematically
+    # collect the touch-and-reverse winners a live post-only order never gets
+    # (adverse selection). Sweep fill_eps as a standard stress axis.
+    fill_eps: float = 0.0             # required penetration past the limit level, as a fraction (0.0005 = 0.05%); fill price stays at the level
+    entry_depth: float = 0.0          # quote the limit deeper by this fraction (long: level*(1-x)); fill condition AND fill price both move
 
 
 def _costs(cfg: BacktestConfig):
@@ -105,10 +112,13 @@ def run_backtest(df, strategy, cfg: BacktestConfig = None):
             entry_j = i + 1
         else:
             level = sig.entry
+            if cfg.entry_depth:
+                level = level * (1 - cfg.entry_depth) if d == "long" else level * (1 + cfg.entry_depth)
             entry = level
             entry_j = None
+            lv_fill = level * (1 - cfg.fill_eps) if d == "long" else level * (1 + cfg.fill_eps)
             for j in range(i + 1, min(i + 1 + sig.entry_window, n)):
-                if (d == "long" and low[j] <= level) or (d == "short" and high[j] >= level):
+                if (d == "long" and low[j] <= lv_fill) or (d == "short" and high[j] >= lv_fill):
                     entry_j = j
                     break
             if entry_j is None:
